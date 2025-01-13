@@ -125,3 +125,66 @@ test_data <- gun_data_final[-train_indices, ]
 
 # View summary to verify the new columns
 summary(gun_data_final)
+
+
+
+
+
+#------ XGBoost
+
+#install.packages("xgboost")
+library(xgboost)
+
+# Calculate class frequencies
+class_counts <- table(train_data$severity)
+# Calculate class proportions
+class_proportions <- class_counts / sum(class_counts)
+# Calculate inverse proportions as weights
+class_weights <- 1 / class_proportions
+# Normalise weights so that the minimum weight is 1 (optional, for better scale handling)
+class_weights <- class_weights / min(class_weights)
+# Assign weights to each instance based on its class
+train_weights <- sapply(train_data$severity, function(x) class_weights[as.character(x)])
+
+dtrain <- xgb.DMatrix(data = as.matrix(train_data[-ncol(train_data)]), 
+                      label = train_data$severity,
+                      weight = train_weights
+)
+
+dtest <- xgb.DMatrix(data = as.matrix(test_data[-ncol(test_data)]), label = test_data$severity)
+
+params <- list(
+  objective = "multi:softmax",  # Use 'multi:softprob' for probability output
+  num_class = length(unique(train_data$severity)),
+  eta = 0.1,
+  gamma = 0.1,
+  max_depth = 8,
+  min_child_weight = 0.5,
+  subsample = 0.8,
+  colsample_bytree = 0.8
+)
+
+model <- xgb.train(params = params, 
+                   data = dtrain, 
+                   nrounds = 100, 
+                   watchlist = list(train = dtrain, test = dtest), 
+                   early_stopping_rounds = 10)
+
+
+
+pred <- predict(model, dtest)
+
+# Ensure labels are factors for confusion matrix
+predicted_labels_factor <- factor(pred, levels = c(0, 1, 2))
+actual_labels_factor <- factor(test_data$severity, levels = c(0, 1, 2))
+
+# Check distribution of predicted and actual labels
+table(predicted_labels_factor)
+table(actual_labels_factor)
+
+confusionMatrix(predicted_labels_factor, actual_labels_factor)
+
+# See which variables are the most important when determining the severity
+importance_matrix <- xgb.importance(feature_names = colnames(train_data[-ncol(train_data)]), model = model)
+print(importance_matrix)
+xgb.plot.importance(importance_matrix)
